@@ -1,29 +1,55 @@
 // src/lib/store.ts
 
-import type { User } from "../types/domain.js";
+import type { UserRecord, Role } from "../types/domain.js";
 
 /**
  * In-memory user store.
  *
- * Why a module-scoped Map instead of a global array:
- * - Encapsulation. Nothing outside this file can mutate the data.
- * - All access goes through the exported functions.
- * - When we migrate to a database later, only this file changes.
+ * CHANGE FROM TASK 3:
+ * - Now stores `UserRecord` (includes passwordHash) instead of `User`.
+ * - Seeded users have pre-hashed passwords. See below.
  *
- * Resets every time the server restarts. That's expected for now.
+ * In a real app this file is replaced by database queries.
+ * The service layer wouldn't change.
  */
 
-const users = new Map<number, User>();
+const users = new Map<number, UserRecord>();
 
 /**
- * Seed data. Runs once at module load.
- * Gives us something to read on first request.
+ * Seed data.
+ *
+ * The password hashes below are for the plaintext "password123".
+ * I pre-computed them so you don't wait ~300ms per user on startup
+ * (bcrypt with cost 12 is deliberately slow).
+ *
+ * Do NOT copy these to production. Generate fresh hashes.
+ *
+ * To generate your own: run `npm run hash -- "yourpassword"` (see package.json).
  */
 function seed(): void {
-  const initial: readonly User[] = [
-    { id: 1, name: "Will Viana",  email: "will@elevvo.dev",  role: "admin"  },
-    { id: 2, name: "Maya Rivera", email: "maya@elevvo.dev",  role: "editor" },
-    { id: 3, name: "Sam Okafor",  email: "sam@elevvo.dev",   role: "viewer" },
+  const initial: readonly UserRecord[] = [
+    {
+      id: 1,
+      name: "Will Viana",
+      email: "will@elevvo.dev",
+      role: "ADMIN",
+      // bcrypt hash of "password123", cost factor 12
+      passwordHash: "$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewLt6fXf3YqX1qnG",
+    },
+    {
+      id: 2,
+      name: "Maya Rivera",
+      email: "maya@elevvo.dev",
+      role: "USER",
+      passwordHash: "$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewLt6fXf3YqX1qnG",
+    },
+    {
+      id: 3,
+      name: "Sam Okafor",
+      email: "sam@elevvo.dev",
+      role: "USER",
+      passwordHash: "$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewLt6fXf3YqX1qnG",
+    },
   ];
   for (const user of initial) {
     users.set(user.id, user);
@@ -31,33 +57,43 @@ function seed(): void {
 }
 seed();
 
-/** Auto-increment counter for new IDs. */
 let nextId = 4;
 
-/* ---------------- Read operations ---------------- */
+/* ---------------- Read ---------------- */
 
-export function findAll(): readonly User[] {
+export function findAll(): readonly UserRecord[] {
   return [...users.values()];
 }
 
-export function findById(id: number): User | null {
+export function findById(id: number): UserRecord | null {
   return users.get(id) ?? null;
 }
 
-/* ---------------- Write operations ---------------- */
+export function findByEmail(email: string): UserRecord | null {
+  // Linear scan. Fine for 3 users; a real DB uses an indexed unique column.
+  // Emails are stored lowercase for consistent lookup.
+  const normalized = email.toLowerCase();
+  for (const user of users.values()) {
+    if (user.email.toLowerCase() === normalized) return user;
+  }
+  return null;
+}
 
-export function create(input: Omit<User, "id">): User {
-  const user: User = { id: nextId++, ...input };
+/* ---------------- Write ---------------- */
+
+export function create(input: Omit<UserRecord, "id">): UserRecord {
+  const user: UserRecord = { id: nextId++, ...input };
   users.set(user.id, user);
   return user;
 }
 
-export function update(id: number, patch: Partial<Omit<User, "id">>): User | null {
+export function update(
+  id: number,
+  patch: Partial<Omit<UserRecord, "id">>,
+): UserRecord | null {
   const existing = users.get(id);
   if (!existing) return null;
-
-  // Merge patch over existing. Immutable — create new object, don't mutate.
-  const updated: User = { ...existing, ...patch };
+  const updated: UserRecord = { ...existing, ...patch };
   users.set(id, updated);
   return updated;
 }

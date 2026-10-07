@@ -1,26 +1,21 @@
 // src/services/userService.ts
 
-import type { User, CreateUserInput, UpdateUserInput } from "../types/domain.js";
+import type {
+  UserRecord,
+  CreateUserInput,
+  UpdateUserInput,
+} from "../types/domain.js";
 import * as store from "../lib/store.js";
+import { hashPassword } from "../lib/hash.js";
 
 /**
- * Service layer. All business logic lives here.
+ * Business logic layer. No HTTP. No req/res. Pure data operations.
  *
- * Rules:
- * - Never touches `req` or `res`. This layer doesn't know HTTP exists.
- * - Throws typed errors. Controllers decide the HTTP status code.
- * - Everything is a pure function over input → output.
- *
- * Why this separation:
- * - Testable: you can call `userService.findAll()` in a unit test with no HTTP.
- * - Reusable: the same service could back a CLI, a GraphQL resolver, or a cron job.
+ * CHANGE FROM TASK 3:
+ * - `createUser` now accepts a plaintext password and hashes it before storage.
+ * - Returns `UserRecord` (with hash). Controllers strip the hash via `toPublicUser`.
  */
 
-/**
- * Custom error class. Controllers check `instanceof NotFoundError`
- * to decide whether to send a 404. Without this, they'd have to
- * parse error message strings — fragile and ugly.
- */
 export class NotFoundError extends Error {
   constructor(public readonly id: number) {
     super(`User ${id} not found`);
@@ -37,11 +32,11 @@ export class ValidationError extends Error {
 
 /* ---------------- Read ---------------- */
 
-export function listUsers(): readonly User[] {
+export function listUsers(): readonly UserRecord[] {
   return store.findAll();
 }
 
-export function getUser(id: number): User {
+export function getUser(id: number): UserRecord {
   const user = store.findById(id);
   if (!user) throw new NotFoundError(id);
   return user;
@@ -49,13 +44,31 @@ export function getUser(id: number): User {
 
 /* ---------------- Write ---------------- */
 
-export function createUser(input: CreateUserInput): User {
+/**
+ * Create a user. Hashes the password before storing.
+ * Async because bcrypt is async — it's CPU-bound work offloaded
+ * to a worker thread by the bcrypt library.
+ */
+export async function createUser(input: CreateUserInput): Promise<UserRecord> {
   validateInput(input);
-  return store.create(input);
+
+  // Reject duplicate emails. Signup also checks this, but this
+  // endpoint is a separate path — defense in depth.
+  if (store.findByEmail(input.email)) {
+    throw new ValidationError("Email already registered");
+  }
+
+  const passwordHash = await hashPassword(input.password);
+
+  return store.create({
+    name: input.name,
+    email: input.email,
+    role: input.role,
+    passwordHash,
+  });
 }
 
-export function updateUser(id: number, input: UpdateUserInput): User {
-  // Verify existence first — better error than "update returned null".
+export function updateUser(id: number, input: UpdateUserInput): UserRecord {
   const existing = store.findById(id);
   if (!existing) throw new NotFoundError(id);
 
@@ -66,9 +79,14 @@ export function updateUser(id: number, input: UpdateUserInput): User {
     throw new ValidationError("email is invalid");
   }
 
-  const updated = store.update(id, input);
-  // We already checked existence, so this should never be null.
-  // Throw if it is — that would mean a bug in the store layer.
+  // Note: password is intentionally NOT updatable via this endpoint.
+  // Password changes go through a dedicated flow (verify old, set new).
+  const patch: Partial<Omit<UserRecord, "id">> = {};
+  if (input.name !== undefined) patch.name = input.name;
+  if (input.email !== undefined) patch.email = input.email;
+  if (input.role !== undefined) patch.role = input.role;
+
+  const updated = store.update(id, patch);
   if (!updated) throw new Error("Store returned null after successful lookup");
   return updated;
 }
@@ -80,11 +98,6 @@ export function deleteUser(id: number): void {
 
 /* ---------------- Helpers ---------------- */
 
-/**
- * Validate a create payload. Throws ValidationError if anything's wrong.
- * Deliberately simple — real validation belongs in a schema library
- * (zod, yup). Task 4 probably introduces that.
- */
 function validateInput(input: CreateUserInput): void {
   if (!input.name || input.name.trim().length === 0) {
     throw new ValidationError("name is required");
@@ -92,13 +105,14 @@ function validateInput(input: CreateUserInput): void {
   if (!input.email || !isValidEmail(input.email)) {
     throw new ValidationError("a valid email is required");
   }
-  if (!["admin", "editor", "viewer"].includes(input.role)) {
-    throw new ValidationError("role must be admin, editor, or viewer");
+  if (input.role !== "ADMIN" && input.role !== "USER") {
+    throw new ValidationError("role must be ADMIN or USER");
+  }
+  if (!input.password || input.password.length < 8) {
+    throw new ValidationError("password must be at least 8 characters");
   }
 }
 
 function isValidEmail(email: string): boolean {
-  // Same intentionally-loose regex from the frontend tasks.
-  // Real validation = send a confirmation email.
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }

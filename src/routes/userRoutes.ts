@@ -2,37 +2,46 @@
 
 import { Router } from "express";
 import * as controller from "../controllers/userController.js";
+import { authenticateToken } from "../middleware/authenticateToken.js";
+import { authorizeRole } from "../middleware/authorizeRole.js";
 
 /**
- * Routes layer.
+ * User routes.
  *
- * Responsibilities:
- * - Declare URL paths.
- * - Map each path + method to a controller function.
+ * Middleware order matters. Express runs them left-to-right.
  *
- * What it does NOT do:
- * - Any logic. No parsing, no validation, no decisions.
- * - Any service calls. Controllers do that.
+ * - authenticateToken: verifies the JWT and sets req.user.
+ * - authorizeRole("ADMIN"): rejects non-admins. Must run AFTER
+ *   authenticateToken, otherwise req.user is undefined.
  *
- * Why a Router and not the app directly:
- * - Modular. This router can be mounted anywhere.
- * - Testable. You can test routes without spinning up the full server.
- * - Composable. In a bigger app, you'd have userRoutes, projectRoutes,
- *   authRoutes, and each lives in its own file.
+ * PUBLIC routes: none. Every user route requires authentication.
  */
 export const userRouter = Router();
 
-// GET /api/users → list
+// All routes below require a valid JWT.
+userRouter.use(authenticateToken);
+
+// GET /api/users — any authenticated user
 userRouter.get("/", controller.listUsers);
 
-// GET /api/users/:id → single
+// GET /api/users/:id — any authenticated user
 userRouter.get("/:id", controller.getUser);
 
-// POST /api/users → create
-userRouter.post("/", controller.createUser);
+// POST /api/users — ADMIN only
+userRouter.post(
+  "/",
+  authorizeRole("ADMIN"),
+  controller.createUser,
+);
 
-// PUT /api/users/:id → update
+// PUT /api/users/:id — ADMIN, or the user themselves.
+// Self-check happens in the controller because it needs to compare
+// req.user.sub against the URL param. Route-level middleware can't do that.
 userRouter.put("/:id", controller.updateUser);
 
-// DELETE /api/users/:id → remove
-userRouter.delete("/:id", controller.deleteUser);
+// DELETE /api/users/:id — ADMIN only
+userRouter.delete(
+  "/:id",
+  authorizeRole("ADMIN"),
+  controller.deleteUser,
+);

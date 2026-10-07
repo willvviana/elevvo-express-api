@@ -3,45 +3,17 @@
 import type { Request, Response } from "express";
 import * as userService from "../services/userService.js";
 import { NotFoundError, ValidationError } from "../services/userService.js";
+import { toPublicUser } from "../types/domain.js";
 import type { CreateUserInput, UpdateUserInput } from "../types/domain.js";
-
-/**
- * Controller layer.
- *
- * Responsibilities:
- * - Parse `req.params`, `req.body`, `req.query` into typed values.
- * - Call the service.
- * - Send the HTTP response.
- * - Catch service errors and map them to status codes.
- *
- * What it does NOT do:
- * - Business logic. That's in the service.
- * - Data persistence. That's in the store.
- *
- * Why async/await everywhere: even though our store is synchronous,
- * a real database call will be async. Controllers should be written
- * as if the service is already async — migrating later is trivial.
- */
 
 /* ---------------- Helpers ---------------- */
 
-/**
- * Parse a route param as a number. Express gives us strings.
- * Returns null if invalid — caller decides how to respond.
- */
 function parseId(raw: string | undefined): number | null {
   if (!raw) return null;
   const n = Number(raw);
   return Number.isInteger(n) && n > 0 ? n : null;
 }
 
-/**
- * Central error handler for a controller.
- * Maps service errors to HTTP status codes.
- *
- * Every controller catch block calls this. One place to change
- * error behavior for the whole API.
- */
 function handleError(res: Response, err: unknown): void {
   if (err instanceof NotFoundError) {
     res.status(404).json({ error: { code: "NOT_FOUND", message: err.message } });
@@ -51,8 +23,6 @@ function handleError(res: Response, err: unknown): void {
     res.status(400).json({ error: { code: "VALIDATION_ERROR", message: err.message } });
     return;
   }
-
-  // Unknown error. Log it, but don't leak details to the client.
   console.error("Unhandled controller error:", err);
   res.status(500).json({
     error: { code: "INTERNAL_ERROR", message: "Internal server error" },
@@ -63,11 +33,12 @@ function handleError(res: Response, err: unknown): void {
 
 /**
  * GET /api/users
- * Returns the full list.
+ * Requires: authenticated. Any role.
+ * Hashes stripped via toPublicUser before sending.
  */
 export function listUsers(_req: Request, res: Response): void {
   try {
-    const users = userService.listUsers();
+    const users = userService.listUsers().map(toPublicUser);
     res.status(200).json({ users, count: users.length });
   } catch (err) {
     handleError(res, err);
@@ -76,7 +47,7 @@ export function listUsers(_req: Request, res: Response): void {
 
 /**
  * GET /api/users/:id
- * Returns one user or 404.
+ * Requires: authenticated. Any role.
  */
 export function getUser(req: Request, res: Response): void {
   const id = parseId(req.params.id);
@@ -89,7 +60,7 @@ export function getUser(req: Request, res: Response): void {
 
   try {
     const user = userService.getUser(id);
-    res.status(200).json({ user });
+    res.status(200).json({ user: toPublicUser(user) });
   } catch (err) {
     handleError(res, err);
   }
@@ -97,14 +68,11 @@ export function getUser(req: Request, res: Response): void {
 
 /**
  * POST /api/users
- * Body must be JSON with name, email, role.
- * Returns 201 Created with the new user.
+ * Requires: ADMIN role (enforced at route level).
+ * Hashes password before storage. Async because bcrypt is async.
  */
-export function createUser(req: Request, res: Response): void {
+export async function createUser(req: Request, res: Response): Promise<void> {
   try {
-    // Body shape is validated inside the service.
-    // We trust req.body is an object because express.json() ran first —
-    // but it could be any JSON: string, number, array. Guard for objects.
     const body = req.body as unknown;
     if (typeof body !== "object" || body === null || Array.isArray(body)) {
       res.status(400).json({
@@ -114,8 +82,8 @@ export function createUser(req: Request, res: Response): void {
     }
 
     const input = body as CreateUserInput;
-    const user = userService.createUser(input);
-    res.status(201).json({ user });
+    const user = await userService.createUser(input);
+    res.status(201).json({ user: toPublicUser(user) });
   } catch (err) {
     handleError(res, err);
   }
@@ -123,13 +91,26 @@ export function createUser(req: Request, res: Response): void {
 
 /**
  * PUT /api/users/:id
- * Partial update. Omitted fields stay unchanged.
+ * Authorization: ADMIN can update anyone.
+ *                Non-admins can only update themselves.
+ *
+ * The check depends on `req.user`, which the auth middleware sets.
+ * It lives in the handler, not route-level middleware, because it
+ * depends on the URL param matching the token subject.
  */
 export function updateUser(req: Request, res: Response): void {
   const id = parseId(req.params.id);
   if (id === null) {
     res.status(400).json({
       error: { code: "INVALID_ID", message: "id must be a positive integer" },
+    });
+    return;
+  }
+
+  // Self-or-admin check.
+  if (req.user && req.user.role !== "ADMIN" && req.user.sub !== id) {
+    res.status(403).json({
+      error: { code: "FORBIDDEN", message: "You can only update your own profile" },
     });
     return;
   }
@@ -145,7 +126,7 @@ export function updateUser(req: Request, res: Response): void {
 
     const input = body as UpdateUserInput;
     const user = userService.updateUser(id, input);
-    res.status(200).json({ user });
+    res.status(200).json({ user: toPublicUser(user) });
   } catch (err) {
     handleError(res, err);
   }
@@ -153,7 +134,7 @@ export function updateUser(req: Request, res: Response): void {
 
 /**
  * DELETE /api/users/:id
- * Returns 204 No Content on success (no body).
+ * Requires: ADMIN only (enforced at route level).
  */
 export function deleteUser(req: Request, res: Response): void {
   const id = parseId(req.params.id);
@@ -166,7 +147,6 @@ export function deleteUser(req: Request, res: Response): void {
 
   try {
     userService.deleteUser(id);
-    // 204 means "success, nothing to say". No JSON body.
     res.status(204).send();
   } catch (err) {
     handleError(res, err);

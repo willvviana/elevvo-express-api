@@ -1,28 +1,62 @@
 // src/types/domain.ts
 
 /**
- * Domain model. Same idea as Task 2 — explicit types, no `any`.
+ * Roles in the system.
+ * Uppercase to match typical JWT convention. Task 3 used lowercase.
  */
+export type Role = "USER" | "ADMIN";
 
-export interface User {
+/**
+ * Internal user record. Includes the hashed password.
+ * NEVER send this object to a client.
+ */
+export interface UserRecord {
   readonly id: number;
   readonly name: string;
   readonly email: string;
-  readonly role: "admin" | "editor" | "viewer";
+  readonly role: Role;
+  readonly passwordHash: string;   // bcrypt hash — never plain text
 }
 
 /**
- * Payload for creating a user.
- * `id` is omitted — the server assigns it.
+ * Public user. What we send to clients.
+ * Same as UserRecord but without the passwordHash.
  */
+export type PublicUser = Omit<UserRecord, "passwordHash">;
+
+/**
+ * Strip the hash before sending to a client.
+ * One function, used everywhere. Never leak a hash by accident.
+ */
+export function toPublicUser(user: UserRecord): PublicUser {
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+  };
+}
+
 export interface CreateUserInput {
   readonly name: string;
   readonly email: string;
-  readonly role: "admin" | "editor" | "viewer";
+  readonly role: Role;
+  readonly password: string;
+}
+
+export type UpdateUserInput = Partial<Omit<CreateUserInput, "password">>;
+
+export interface LoginInput {
+  readonly email: string;
+  readonly password: string;
 }
 
 /**
- * Payload for updating a user.
- * All fields optional — a partial update.
+ * JWT payload. Keep it minimal — it's readable by anyone.
+ * Only include what the middleware needs to authorize requests.
  */
-export type UpdateUserInput = Partial<CreateUserInput>;
+export interface JwtPayload {
+  readonly sub: number;        // subject = user id (JWT convention)
+  readonly email: string;
+  readonly role: Role;
+}

@@ -24,13 +24,8 @@ export class AuthError extends Error {
 }
 
 /**
- * Precomputed bcrypt hash of an arbitrary string, used as a timing decoy
- * when the user doesn't exist. Without this, the response time for a
- * non-existent user would be measurably faster than for a wrong password,
- * leaking which emails are registered.
- *
- * This is a real hash of "dummy" — its actual value doesn't matter,
- * only that it takes the same ~250ms to compare against.
+ * Precomputed bcrypt hash used as a timing decoy when a user doesn't exist.
+ * Ensures login takes similar time whether or not the email is registered.
  */
 const DUMMY_HASH =
   "$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewLt6fXf3YqX1qnG";
@@ -46,7 +41,6 @@ export async function login(
   const passwordOk = await verifyPassword(input.password, hashToCheck);
 
   if (!user || !passwordOk) {
-    // Single generic error for both cases. No leaks.
     throw new AuthError("Invalid email or password", "INVALID_CREDENTIALS");
   }
 

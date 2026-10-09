@@ -143,8 +143,29 @@ app.use(
     res: express.Response,
     _next: express.NextFunction,
   ) => {
-    console.error("Unhandled error:", err);
     if (res.headersSent) return;
+
+    // express.json() sets err.status = 400 on malformed JSON.
+    // Honor it instead of returning 500 for a client error.
+    let status = 500;
+    if (
+      typeof err === "object" &&
+      err !== null &&
+      "status" in err &&
+      typeof (err as { status: unknown }).status === "number"
+    ) {
+      status = (err as { status: number }).status;
+    }
+
+    console.error("Unhandled error:", err);
+
+    if (status === 400) {
+      res.status(400).json({
+        error: { code: "BAD_REQUEST", message: "Malformed request body" },
+      });
+      return;
+    }
+
     res.status(500).json({
       error: { code: "INTERNAL_ERROR", message: "Internal server error" },
     });

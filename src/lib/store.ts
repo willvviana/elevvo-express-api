@@ -33,22 +33,21 @@ function seed(): void {
       name: "Will Viana",
       email: "will@elevvo.dev",
       role: "ADMIN",
-      // bcrypt hash of "password123", cost factor 12
-      passwordHash: "$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewLt6fXf3YqX1qnG",
+      passwordHash: "$2b$12$MHGsRV/OtMvJwwVqyro24uFiFJhNYu82692e1CpkqnDfbNu/RQz1.",
     },
     {
       id: 2,
       name: "Maya Rivera",
       email: "maya@elevvo.dev",
       role: "USER",
-      passwordHash: "$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewLt6fXf3YqX1qnG",
+      passwordHash: "$2b$12$MHGsRV/OtMvJwwVqyro24uFiFJhNYu82692e1CpkqnDfbNu/RQz1.",
     },
     {
       id: 3,
       name: "Sam Okafor",
       email: "sam@elevvo.dev",
       role: "USER",
-      passwordHash: "$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewLt6fXf3YqX1qnG",
+      passwordHash: "$2b$12$MHGsRV/OtMvJwwVqyro24uFiFJhNYu82692e1CpkqnDfbNu/RQz1.",
     },
   ];
   for (const user of initial) {

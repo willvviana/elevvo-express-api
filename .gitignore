@@ -8,3 +8,12 @@ Thumbs.db
 .vscode/
 .idea/
 /src/generated/prisma
+
+# AI agent tooling directories
+.agents/
+.claude/
+.cursor/
+.devin/
+
+# Prisma generated client (if you move it out of node_modules)
+/generated/

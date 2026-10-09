@@ -1,0 +1,133 @@
+// prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/* ============================================================
+   USER
+   Extends Task 4's User model. Same fields, now persisted.
+   `passwordHash` is the bcrypt hash — never the plain password.
+   ============================================================ */
+
+model User {
+  id           Int      @id @default(autoincrement())
+  email        String   @unique
+  name         String
+  passwordHash String
+  role         Role     @default(CUSTOMER)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relations — a user has many orders
+  orders       Order[]
+
+  @@map("users")
+}
+
+/* ============================================================
+   ROLE
+   Note: Task 4 used ADMIN/USER. Task 5's brief uses
+   ADMIN/CUSTOMER. I'm using the brief's terminology, which
+   matches e-commerce semantics. Any Task 4 code that
+   references "USER" role will need updating.
+   ============================================================ */
+
+enum Role {
+  ADMIN
+  CUSTOMER
+}
+
+/* ============================================================
+   PRODUCT
+   A sellable item. Has stock, price, and a description
+   we'll later use for vector embeddings (Task 9).
+   ============================================================ */
+
+model Product {
+  id          Int      @id @default(autoincrement())
+  name        String
+  description String
+  price       Decimal  @db.Decimal(10, 2)   // money — never use Float
+  stock       Int      @default(0)
+  category    String
+  imageUrl    String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations — a product appears in many order items
+  orderItems  OrderItem[]
+
+  // Indexes for filtering queries
+  @@index([category])
+  @@map("products")
+}
+
+/* ============================================================
+   ORDER
+   A purchase. Total is denormalized — computed at checkout
+   and stored, so historical orders don't change when prices do.
+   ============================================================ */
+
+model Order {
+  id         Int         @id @default(autoincrement())
+  userId     Int
+  status     OrderStatus @default(PENDING)
+  total      Decimal     @db.Decimal(10, 2)
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+
+  // Relations
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items      OrderItem[]
+
+  // Indexes for common queries
+  @@index([userId])
+  @@index([status])
+  @@map("orders")
+}
+
+/* ============================================================
+   ORDER STATUS
+   State machine for order lifecycle.
+   ============================================================ */
+
+enum OrderStatus {
+  PENDING
+  PAID
+  SHIPPED
+  DELIVERED
+  CANCELLED
+}
+
+/* ============================================================
+   ORDER ITEM
+   Many-to-many join between Order and Product.
+   This is the standard pattern: an order has many products,
+   a product appears in many orders.
+   
+   `priceAtPurchase` snapshots the product price at order time.
+   The OrderItem doesn't reference Product.price because that
+   can change later — we want the historical value.
+   ============================================================ */
+
+model OrderItem {
+  id              Int     @id @default(autoincrement())
+  orderId         Int
+  productId       Int
+  quantity        Int
+  priceAtPurchase Decimal @db.Decimal(10, 2)
+
+  // Relations
+  order           Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product         Product @relation(fields: [productId], references: [id])
+
+  @@index([orderId])
+  @@index([productId])
+  @@map("order_items")
+}

@@ -1,26 +1,28 @@
 # Elevvo Express API
 
-A REST API built with Express and TypeScript, demonstrating layered architecture, JWT authentication, role-based access control, and production security middleware.
+A REST API for an e-commerce domain, built with Express, TypeScript, and PostgreSQL via Prisma ORM. Demonstrates layered architecture, JWT auth with RBAC, relational data modeling, atomic transactional checkout, and production security middleware.
 
-Part of the Elevvo backend task sequence. Extends Task 3 (controller-service architecture) with Task 4 additions (auth, RBAC, hardening).
+Part of the Elevvo backend task sequence.
+
+- **Task 3** — Express API, controller-service architecture
+- **Task 4** — JWT auth, RBAC, security hardening
+- **Task 5** — PostgreSQL persistence, Prisma ORM, atomic checkout with `$transaction`
 
 ## What it does
 
-A `users` resource API with:
+A small e-commerce backend with three resources: **users**, **products**, and **orders**.
 
-- **Layered architecture** — routes → controllers → services → store
+- **Layered architecture** — routes → controllers → services → store (Prisma)
 - **JWT authentication** — login issues a signed token, protected routes verify it
-- **Role-based access control** — `ADMIN` and `USER` roles with different permissions
+- **Role-based access control** — `ADMIN` and `CUSTOMER` roles with different permissions
 - **Password security** — bcrypt hashing at cost factor 12
 - **Observability** — every request logged with timestamp, method, path, status, duration
 - **Security hardening** — Helmet headers, strict CORS whitelist, rate limiting
-- **API key gate** — `/api/users` requires both `x-api-key` and a valid JWT
-
-In-memory storage. No database. Data resets on every restart.
+- **Relational persistence** — PostgreSQL with Prisma, migration history in `prisma/migrations/`
+- **Atomic checkout** — order creation wrapped in a Prisma `$transaction` to guarantee inventory consistency
+- **Pagination & filtering** — cursor-based pagination on products, filter by category
 
 ## Architecture
-
-The layering matters. Each layer has one job.
 
 ```
 Request
@@ -45,7 +47,7 @@ Request
   ↓
 [ services ]                        business logic
   ↓
-[ lib/store ]                       in-memory data
+[ lib/store ]                       Prisma queries → PostgreSQL
 ```
 
 **Rules the code follows:**
@@ -53,13 +55,15 @@ Request
 - **Routes** declare URLs. Nothing else.
 - **Controllers** handle HTTP: parse requests, call services, send responses. No business logic.
 - **Services** handle business logic. They never touch `req` or `res`.
-- **Store** is the only place data lives. Swapping to a real database means changing one file.
+- **Store** is the only place Prisma is used. Swapping databases means changing one file.
 
 ## Stack
 
 - **Node.js** ≥20
 - **Express 4** — HTTP framework
 - **TypeScript** — strict mode (`strict: true`, `noImplicitAny`, `strictNullChecks`)
+- **PostgreSQL 16** — relational database, runs in Docker locally
+- **Prisma 6** — ORM and migration tool
 - **bcrypt 6** — password hashing
 - **jsonwebtoken** — JWT issuing and verification
 - **helmet** — security headers
@@ -67,27 +71,63 @@ Request
 - **cors** — origin whitelisting
 - **tsx** — TypeScript execution without a build step
 
+## Domain model
+
+Four tables with proper relations:
+
+```
+User ──┬──< Order ──< OrderItem >── Product
+```
+
+- A **User** has many **Orders**.
+- An **Order** has many **OrderItems**.
+- An **OrderItem** references one **Product**.
+- Many-to-many between Order and Product is modeled via the OrderItem join table.
+- `OrderItem.priceAtPurchase` snapshots the product price at checkout, so historical orders don't change when prices do.
+
 ## Run locally
 
+### 1. Start Postgres in Docker
+
 ```bash
-# Clone
-git clone https://github.com/willvviana/elevvo-express-api.git
-cd elevvo-express-api
+docker compose up -d
+```
 
-# Install
+This starts a Postgres 16 container on port 5432 with a persistent volume.
+
+### 2. Install dependencies
+
+```bash
 npm install
+```
 
-# Generate a bcrypt hash for seed passwords
-npm run hash -- "password123"
-# Copy the output, replace the three passwordHash values in src/lib/store.ts
+### 3. Configure environment
 
-# Set environment variables (PowerShell)
+Create `.env` at the repo root:
+
+```
+DATABASE_URL="postgresql://elevvo:elevvo_dev_password@localhost:5432/elevvo_dev?schema=public"
+```
+
+Set the remaining environment variables in your shell (PowerShell):
+
+```powershell
 $env:API_KEY="dev-secret-123"
 $env:JWT_SECRET="dev-jwt-secret-change-in-production-min-32-chars"
 $env:JWT_EXPIRES_IN="1h"
 $env:ALLOWED_ORIGINS="http://localhost:5173,http://localhost:3000"
+```
 
-# Start
+### 4. Apply migrations and seed
+
+```bash
+npx prisma migrate dev
+npx tsx prisma/seed.ts
+```
+
+### 5. Start the server
+
+```bash
 npm run dev
 ```
 
@@ -97,6 +137,7 @@ Server runs at `http://localhost:3000`.
 
 | Variable | Purpose | Minimum |
 |---|---|---|
+| `DATABASE_URL` | PostgreSQL connection string | Non-empty |
 | `API_KEY` | Shared secret for `/api/users` requests | Non-empty |
 | `JWT_SECRET` | Signing key for JWTs | **32 characters** |
 | `JWT_EXPIRES_IN` | Token lifetime (optional) | Default: `1h` |
@@ -105,15 +146,15 @@ Server runs at `http://localhost:3000`.
 
 ## Seeded users
 
-Three users are seeded on startup, all with password `password123`:
+Three users, all with password `password123`:
 
 | Email | Role |
 |---|---|
 | will@elevvo.dev | ADMIN |
-| maya@elevvo.dev | USER |
-| sam@elevvo.dev | USER |
+| maya@elevvo.dev | CUSTOMER |
+| sam@elevvo.dev | CUSTOMER |
 
-The hash in `src/lib/store.ts` must match `password123`. Generate it with `npm run hash -- "password123"`.
+Run `npx tsx prisma/seed.ts` to insert them. The script uses `upsert`, so re-running is safe.
 
 ## API endpoints
 
@@ -124,6 +165,8 @@ The hash in `src/lib/store.ts` must match `password123`. Generate it with `npm r
 | GET | `/api/health` | Uptime and status |
 | POST | `/api/auth/signup` | Register a new user |
 | POST | `/api/auth/login` | Exchange credentials for a JWT. Rate limited to 5 attempts per 15 minutes per IP. |
+| GET | `/api/products` | List products. Supports `?page=&perPage=&category=` |
+| GET | `/api/products/:id` | Get one product |
 
 ### Authenticated (requires `Authorization: Bearer <token>`)
 
@@ -135,27 +178,55 @@ The hash in `src/lib/store.ts` must match `password123`. Generate it with `npm r
 | POST | `/api/users` | ADMIN (also requires `x-api-key`) |
 | PUT | `/api/users/:id` | ADMIN, or the user themselves (also requires `x-api-key`) |
 | DELETE | `/api/users/:id` | ADMIN (also requires `x-api-key`) |
+| POST | `/api/products` | ADMIN |
+| PUT | `/api/products/:id` | ADMIN |
+| DELETE | `/api/products/:id` | ADMIN |
+| POST | `/api/orders` | Any authenticated |
+| GET | `/api/orders` | Any authenticated (own orders only) |
+| GET | `/api/orders/:id` | Any authenticated (own order, or any if ADMIN) |
 
-## Example flow
+## Atomic checkout
+
+The `POST /api/orders` endpoint performs three operations atomically inside a Prisma `$transaction`:
+
+1. Verify every product exists and has sufficient stock.
+2. Decrement stock for each product.
+3. Create the order and its order items.
+
+If **any** step fails — missing product, insufficient stock, database error — the entire transaction rolls back. No half-state. This is the critical guarantee for inventory consistency.
+
+**Why this matters.** Without the transaction, a failure between step 2 and step 3 would leave the database with stock decremented but no order created. That's a silent data integrity bug that compounds over time.
+
+### Example: place an order
 
 ```bash
-# 1. Login
-curl.exe -X POST http://localhost:3000/api/auth/login \
+curl.exe -X POST http://localhost:3000/api/orders \
   -H "Content-Type: application/json" \
-  -d "{\"email\":\"will@elevvo.dev\",\"password\":\"password123\"}"
-
-# Response: { "token": "eyJhbGc...", "user": {...} }
-
-# 2. Use the token on a protected route
-curl.exe -H "x-api-key: dev-secret-123" \
   -H "Authorization: Bearer <TOKEN>" \
-  http://localhost:3000/api/users
+  -d '{"items":[{"productId":1,"quantity":2},{"productId":2,"quantity":1}]}'
+```
 
-# 3. Delete requires ADMIN
-curl.exe -X DELETE \
-  -H "x-api-key: dev-secret-123" \
-  -H "Authorization: Bearer <TOKEN>" \
-  http://localhost:3000/api/users/3
+Response:
+
+```json
+{
+  "order": {
+    "id": 1,
+    "userId": 2,
+    "status": "PENDING",
+    "total": "649.48",
+    "items": [
+      {
+        "id": 1,
+        "productId": 1,
+        "quantity": 2,
+        "priceAtPurchase": "249.99",
+        "product": { "id": 1, "name": "Wireless Headphones" }
+      },
+      { "id": 2, "productId": 2, "quantity": 1, "priceAtPurchase": "149.5" }
+    ]
+  }
+}
 ```
 
 ## Error format
@@ -182,7 +253,7 @@ Status codes:
 | 401 | Not authenticated |
 | 403 | Authenticated but not authorized |
 | 404 | Resource not found |
-| 409 | Conflict (email exists) |
+| 409 | Conflict (e.g., email exists, FK constraint) |
 | 429 | Rate limited |
 | 500 | Server error |
 
@@ -197,23 +268,26 @@ Status codes:
 - **Helmet** — standard security headers.
 - **Fail-closed env handling** — server won't start if `JWT_SECRET` is missing or under 32 characters.
 - **No password hashes in responses** — `toPublicUser()` strips the hash before serialization.
+- **Server-controlled pricing** — order totals are computed from database prices, never from client input.
+- **Order ownership enforced in service layer** — a customer cannot view another customer's order (returns 404 to prevent id enumeration).
 
 ## What's missing
 
-- **No token revocation.** A JWT is valid until it expires. Client-side logout doesn't invalidate the token server-side. Production uses short-lived access tokens + refresh tokens, or a revocation blocklist.
+- **No token revocation.** A JWT is valid until it expires. Client-side logout doesn't invalidate the token server-side.
 - **No refresh tokens.** Users re-login every hour.
-- **No database.** In-memory storage. Data vanishes on restart.
+- **No tests.** Zero automated coverage on auth and order flows.
 - **No email verification.** Signup creates active accounts immediately.
-- **No tests.** The auth flow has zero automated coverage.
-- **No logout endpoint.** Stateless JWTs have nothing to invalidate without extra infrastructure.
 - **API key is a single static value.** No rotation, no per-client keys.
 - **No password reset flow.**
+- **Decimal handling in total calculation** — `Number(product.price) * quantity` converts the Prisma Decimal to a JS number. For small totals this is safe; a real payments system should use a decimal library like `decimal.js` for the arithmetic.
+- **No soft deletes.** Deleting a product that's referenced by an order is blocked by the FK constraint. If you want deletions, add an `isActive` flag instead.
 
 ## What I'd add next
 
 - Integration tests with `supertest` and `vitest`
 - Schema validation with `zod`
-- Persistence with SQLite or Postgres
+- Redis caching for catalog reads (Task 6)
+- Distributed rate limiting via Redis (Task 6)
 - Refresh token rotation
 - Structured logging with `pino`
 - OpenAPI spec generation

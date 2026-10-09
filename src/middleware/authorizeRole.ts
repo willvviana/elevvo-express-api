@@ -9,7 +9,7 @@ import type { Role } from "../types/domain.js";
  * Usage:
  *   router.get("/admin-only", authenticateToken, authorizeRole("ADMIN"), handler)
  *   router.get("/any-logged-in", authenticateToken, handler)
- *   router.get("/staff-only", authenticateToken, authorizeRole("ADMIN", "USER"), handler)
+ *   router.get("/staff-only", authenticateToken, authorizeRole("ADMIN", "CUSTOMER"), handler)
  *
  * IMPORTANT: this middleware MUST run AFTER authenticateToken.
  * It relies on `req.user` being set. If authenticateToken isn't in the

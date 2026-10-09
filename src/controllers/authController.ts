@@ -107,7 +107,7 @@ export async function signup(req: Request, res: Response): Promise<void> {
   // Only allow role to be set by a new user if it's a valid value.
   // Never let a caller promote themselves without a check.
   // In this demo we allow both, but flag it in comments.
-  const validRole = role === "ADMIN" || role === "USER" ? role : "USER";
+  const validRole = role === "ADMIN" || role === "CUSTOMER" ? role : "CUSTOMER";
 
   try {
     const user = await authService.signup({ name, email, password, role: validRole });

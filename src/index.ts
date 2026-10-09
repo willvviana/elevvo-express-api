@@ -1,5 +1,6 @@
 // src/index.ts
 
+import "dotenv/config";
 import express from "express";
 import helmet from "helmet";
 import cors from "cors";
@@ -10,35 +11,26 @@ import { observability } from "./middleware/observability.js";
 import { requireApiKey } from "./middleware/requireApiKey.js";
 import { userRouter } from "./routes/userRoutes.js";
 import { authRouter } from "./routes/authRoutes.js";
+import { productRouter } from "./routes/productRoutes.js";
+import { orderRouter } from "./routes/orderRoutes.js";
 
 const app = express();
 
 /* ============================================================
    SECURITY HEADERS
-   Runs first. Sets X-Frame-Options, X-Content-Type-Options,
-   Strict-Transport-Security, and ~10 others on every response.
-   One line covers a lot of the OWASP top-10 default headers.
    ============================================================ */
 app.use(helmet());
 
 /* ============================================================
    CORS — strict origin whitelist
-   Only listed origins can make browser requests.
-   `credentials: true` means cookies and Authorization headers
-   are allowed — but that REQUIRES a specific origin, never "*".
    ============================================================ */
 app.use(
   cors({
     origin: (origin, callback) => {
-      // Allow requests with no Origin header (curl, Postman, server-to-server).
-      // Browsers always send Origin for cross-origin requests; non-browsers don't.
       if (!origin) return callback(null, true);
-
       if (env.ALLOWED_ORIGINS.includes(origin)) {
         return callback(null, true);
       }
-      // Reject. This propagates to the CORS handler which omits the header,
-      // and the browser blocks the response.
       return callback(new Error(`Origin not allowed: ${origin}`));
     },
     credentials: true,
@@ -47,7 +39,6 @@ app.use(
 
 /* ============================================================
    OBSERVABILITY
-   Registered early so rejected requests still get logged.
    ============================================================ */
 app.use(observability);
 
@@ -58,23 +49,12 @@ app.use(express.json({ limit: "100kb" }));
 
 /* ============================================================
    RATE LIMITERS
-   Two separate limiters with different policies:
-   - Global: general protection.
-   - Login: strict, because brute-forcing passwords is the threat.
    ============================================================ */
-
-/**
- * Login rate limiter.
- * 5 attempts per 15 minutes per IP. Returns 429 Too Many Requests.
- *
- * This is the single most important defense against password brute force.
- * Without it, an attacker can try thousands of passwords per second.
- */
 const loginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,   // 15 minutes
-  max: 5,                      // 5 requests per window per IP
-  standardHeaders: true,       // send RateLimit-* headers
-  legacyHeaders: false,        // disable X-RateLimit-* (deprecated)
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
   message: {
     error: {
       code: "RATE_LIMITED",
@@ -83,10 +63,6 @@ const loginLimiter = rateLimit({
   },
 });
 
-/**
- * Global limiter. Generous — we don't want to break legitimate use.
- * 100 requests per minute per IP.
- */
 const globalLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 100,
@@ -100,10 +76,10 @@ const globalLimiter = rateLimit({
 app.use("/api", globalLimiter);
 
 /* ============================================================
-   PUBLIC ROUTES (no API key, no JWT)
+   PUBLIC ROUTES
    ============================================================ */
 
-// Health check — used by uptime monitors and load balancers.
+// Health check — public, no auth, no API key.
 app.get("/api/health", (_req, res) => {
   res.json({
     status: "ok",
@@ -112,13 +88,18 @@ app.get("/api/health", (_req, res) => {
   });
 });
 
-// Login and signup — public, but login has its own rate limiter.
+// Auth routes. Login has its own stricter limiter applied first.
 app.use("/api/auth/login", loginLimiter);
 app.use("/api/auth", authRouter);
 
+// Product routes — PUBLIC reads, ADMIN-only writes.
+// Note: no requireApiKey here. Browsing the catalog shouldn't need a secret.
+app.use("/api/products", productRouter);
+app.use("/api/orders", orderRouter);
+
 /* ============================================================
    PROTECTED ROUTES
-   API key required. JWT required per-route (see userRoutes.ts).
+   API key + JWT required. See userRoutes.ts for per-route auth.
    ============================================================ */
 app.use("/api/users", requireApiKey, userRouter);
 
@@ -133,8 +114,6 @@ app.use((req, res) => {
 
 /* ============================================================
    GLOBAL ERROR HANDLER
-   Express identifies this by the 4-argument signature.
-   Must be last.
    ============================================================ */
 app.use(
   (
@@ -145,8 +124,6 @@ app.use(
   ) => {
     if (res.headersSent) return;
 
-    // express.json() sets err.status = 400 on malformed JSON.
-    // Honor it instead of returning 500 for a client error.
     let status = 500;
     if (
       typeof err === "object" &&

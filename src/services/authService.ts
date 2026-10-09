@@ -24,8 +24,8 @@ export class AuthError extends Error {
 }
 
 /**
- * Precomputed bcrypt hash used as a timing decoy when a user doesn't exist.
- * Ensures login takes similar time whether or not the email is registered.
+ * Decoy hash used when a user doesn't exist.
+ * Prevents timing-based user enumeration on login.
  */
 const DUMMY_HASH =
   "$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewLt6fXf3YqX1qnG";
@@ -33,10 +33,8 @@ const DUMMY_HASH =
 export async function login(
   input: LoginInput,
 ): Promise<{ token: string; user: PublicUser }> {
-  const user = store.findByEmail(input.email);
+  const user = await store.findUserByEmail(input.email);
 
-  // Always run a bcrypt compare, even for missing users.
-  // Timing attack mitigation.
   const hashToCheck = user?.passwordHash ?? DUMMY_HASH;
   const passwordOk = await verifyPassword(input.password, hashToCheck);
 
@@ -56,7 +54,9 @@ function signToken(user: UserRecord): string {
   };
 
   return jwt.sign(payload, env.JWT_SECRET, {
-    expiresIn: env.JWT_EXPIRES_IN,
+    // Cast to the non-undefined variant — env.ts already guarantees
+    // a default of "1h", so at runtime this is never undefined.
+    expiresIn: env.JWT_EXPIRES_IN as NonNullable<jwt.SignOptions["expiresIn"]>,
     algorithm: "HS256",
   });
 }
@@ -67,16 +67,17 @@ export async function signup(input: {
   password: string;
   role?: Role;
 }): Promise<PublicUser> {
-  if (store.findByEmail(input.email)) {
+  const existing = await store.findUserByEmail(input.email);
+  if (existing) {
     throw new AuthError("Email already registered", "EMAIL_EXISTS");
   }
 
   const passwordHash = await hashPassword(input.password);
 
-  const record = store.create({
+  const record = await store.createUser({
     name: input.name,
     email: input.email,
-    role: input.role ?? "USER",
+    role: input.role ?? "CUSTOMER",
     passwordHash,
   });
 
@@ -95,7 +96,7 @@ export function verifyToken(token: string): JwtPayload {
   if (
     typeof decoded["sub"] !== "number" ||
     typeof decoded["email"] !== "string" ||
-    (decoded["role"] !== "USER" && decoded["role"] !== "ADMIN")
+    (decoded["role"] !== "ADMIN" && decoded["role"] !== "CUSTOMER")
   ) {
     throw new Error("JWT payload is missing required claims");
   }

@@ -27,7 +27,7 @@ export const env = {
   API_KEY: required("API_KEY"),
   JWT_SECRET: required("JWT_SECRET"),
 
-  JWT_EXPIRES_IN: optional("JWT_EXPIRES_IN", "1h"),
+  JWT_EXPIRES_IN: optional("JWT_EXPIRES_IN", "1h") as string,
   NODE_ENV: optional("NODE_ENV", "development"),
 
   ALLOWED_ORIGINS: optional("ALLOWED_ORIGINS", "http://localhost:5173")

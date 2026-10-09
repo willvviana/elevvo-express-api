@@ -9,14 +9,18 @@
     "start": "node dist/index.js",
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "hash": "node -e \"const b=require('bcrypt');const p=process.argv[1];b.hash(p,12).then(h=>console.log(h))\""
+    "hash": "node -e \"const b=require('bcrypt');const p=process.argv[1];b.hash(p,12).then(h=>console.log(h))\"",
+    "postinstall": "prisma skills sync || exit 0"
   },
   "engines": {
     "node": ">=20"
   },
   "dependencies": {
+    "@prisma/adapter-pg": "^7.10.0",
+    "@prisma/client": "^6.19.3",
     "bcrypt": "^6.0.0",
     "cors": "^2.8.5",
+    "dotenv": "^18.0.7",
     "express": "^4.21.2",
     "express-rate-limit": "^7.4.1",
     "helmet": "^8.0.0",
@@ -28,6 +32,7 @@
     "@types/express": "^5.0.0",
     "@types/jsonwebtoken": "^9.0.7",
     "@types/node": "^22.0.0",
+    "prisma": "^6.19.3",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0"
   }

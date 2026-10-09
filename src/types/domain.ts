@@ -1,38 +1,51 @@
 // src/types/domain.ts
 
 /**
- * Roles in the system.
- * Uppercase to match typical JWT convention. Task 3 used lowercase.
+ * Domain types.
+ *
+ * ROLE CHANGE FROM TASK 4: "USER" → "CUSTOMER".
+ * Aligns with the Prisma enum and matches e-commerce semantics.
  */
-export type Role = "USER" | "ADMIN";
+
+export type Role = "ADMIN" | "CUSTOMER";
+
+export type OrderStatus =
+  | "PENDING"
+  | "PAID"
+  | "SHIPPED"
+  | "DELIVERED"
+  | "CANCELLED";
 
 /**
- * Internal user record. Includes the hashed password.
- * NEVER send this object to a client.
+ * User as stored in the database.
+ * Timestamps are Date objects — Prisma returns them that way.
+ * NEVER send this object to a client (passwordHash leaks).
  */
 export interface UserRecord {
   readonly id: number;
-  readonly name: string;
   readonly email: string;
+  readonly name: string;
   readonly role: Role;
-  readonly passwordHash: string;   // bcrypt hash — never plain text
+  readonly passwordHash: string;
+  readonly createdAt: Date;
+  readonly updatedAt: Date;
 }
 
 /**
- * Public user. What we send to clients.
- * Same as UserRecord but without the passwordHash.
+ * Public user. What we send to clients. No hash, no internal timestamps.
  */
-export type PublicUser = Omit<UserRecord, "passwordHash">;
+export interface PublicUser {
+  readonly id: number;
+  readonly email: string;
+  readonly name: string;
+  readonly role: Role;
+}
 
-/**
- * Strip the hash before sending to a client.
- * One function, used everywhere. Never leak a hash by accident.
- */
 export function toPublicUser(user: UserRecord): PublicUser {
   return {
     id: user.id,
-    name: user.name,
     email: user.email,
+    name: user.name,
     role: user.role,
   };
 }
@@ -51,12 +64,8 @@ export interface LoginInput {
   readonly password: string;
 }
 
-/**
- * JWT payload. Keep it minimal — it's readable by anyone.
- * Only include what the middleware needs to authorize requests.
- */
 export interface JwtPayload {
-  readonly sub: number;        // subject = user id (JWT convention)
+  readonly sub: number;
   readonly email: string;
   readonly role: Role;
 }

@@ -1,0 +1,27 @@
+# docker-compose.yml
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: elevvo-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: elevvo
+      POSTGRES_PASSWORD: elevvo_dev_password
+      POSTGRES_DB: elevvo_dev
+    ports:
+      # host:container — exposes Postgres on localhost:5432
+      - "5432:5432"
+    volumes:
+      # named volume — data survives container restarts
+      # but is deleted by `docker compose down -v`
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # other services can wait until this passes before starting
+      test: ["CMD-SHELL", "pg_isready -U elevvo -d elevvo_dev"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:

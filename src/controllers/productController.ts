@@ -1,17 +1,9 @@
-// src/controllers/userController.ts
+// src/controllers/productController.ts
 
 import type { Request, Response } from "express";
-import * as userService from "../services/userService.js";
+import * as productService from "../services/productService.js";
 import { NotFoundError, ValidationError } from "../services/userService.js";
-import { toPublicUser } from "../types/domain.js";
-import type { CreateUserInput, UpdateUserInput } from "../types/domain.js";
 
-/* ---------------- Helpers ---------------- */
-
-/**
- * Express types route params as `string | string[] | undefined`.
- * In practice, for `:id`, it's always a string. Guard defensively anyway.
- */
 function parseId(raw: unknown): number | null {
   if (typeof raw !== "string" || raw.length === 0) return null;
   const n = Number(raw);
@@ -27,31 +19,43 @@ function handleError(res: Response, err: unknown): void {
     res.status(400).json({ error: { code: "VALIDATION_ERROR", message: err.message } });
     return;
   }
+  // Generic Error thrown by store — e.g. FK constraint on delete
+  if (err instanceof Error && err.message.includes("referenced by")) {
+    res.status(409).json({ error: { code: "CONFLICT", message: err.message } });
+    return;
+  }
   console.error("Unhandled controller error:", err);
   res.status(500).json({
     error: { code: "INTERNAL_ERROR", message: "Internal server error" },
   });
 }
 
-/* ---------------- Handlers ---------------- */
-
 /**
- * GET /api/users
+ * GET /api/products?page=1&perPage=10&category=Electronics
+ * Public route — no auth required.
  */
-export async function listUsers(_req: Request, res: Response): Promise<void> {
+export async function listProducts(req: Request, res: Response): Promise<void> {
   try {
-    const users = await userService.listUsers();
-    const publicUsers = users.map(toPublicUser);
-    res.status(200).json({ users: publicUsers, count: publicUsers.length });
+    const page = Number(req.query.page) || 1;
+    const perPage = Number(req.query.perPage) || 10;
+    const category = typeof req.query.category === "string" ? req.query.category : undefined;
+
+    const result = await productService.listProducts({
+      page,
+      perPage,
+      ...(category !== undefined ? { category } : {}),
+    });
+
+    res.status(200).json(result);
   } catch (err) {
     handleError(res, err);
   }
 }
 
 /**
- * GET /api/users/:id
+ * GET /api/products/:id
  */
-export async function getUser(req: Request, res: Response): Promise<void> {
+export async function getProduct(req: Request, res: Response): Promise<void> {
   const id = parseId(req.params.id);
   if (id === null) {
     res.status(400).json({
@@ -61,17 +65,17 @@ export async function getUser(req: Request, res: Response): Promise<void> {
   }
 
   try {
-    const user = await userService.getUser(id);
-    res.status(200).json({ user: toPublicUser(user) });
+    const product = await productService.getProduct(id);
+    res.status(200).json({ product });
   } catch (err) {
     handleError(res, err);
   }
 }
 
 /**
- * POST /api/users
+ * POST /api/products — ADMIN only (enforced at route level).
  */
-export async function createUser(req: Request, res: Response): Promise<void> {
+export async function createProduct(req: Request, res: Response): Promise<void> {
   try {
     const body = req.body as unknown;
     if (typeof body !== "object" || body === null || Array.isArray(body)) {
@@ -80,30 +84,29 @@ export async function createUser(req: Request, res: Response): Promise<void> {
       });
       return;
     }
-
-    const input = body as CreateUserInput;
-    const user = await userService.createUser(input);
-    res.status(201).json({ user: toPublicUser(user) });
+    const input = body as {
+      name: string;
+      description: string;
+      price: number;
+      stock: number;
+      category: string;
+      imageUrl?: string | null;
+    };
+    const product = await productService.createProduct(input);
+    res.status(201).json({ product });
   } catch (err) {
     handleError(res, err);
   }
 }
 
 /**
- * PUT /api/users/:id
+ * PUT /api/products/:id — ADMIN only.
  */
-export async function updateUser(req: Request, res: Response): Promise<void> {
+export async function updateProduct(req: Request, res: Response): Promise<void> {
   const id = parseId(req.params.id);
   if (id === null) {
     res.status(400).json({
       error: { code: "INVALID_ID", message: "id must be a positive integer" },
-    });
-    return;
-  }
-
-  if (req.user && req.user.role !== "ADMIN" && req.user.sub !== id) {
-    res.status(403).json({
-      error: { code: "FORBIDDEN", message: "You can only update your own profile" },
     });
     return;
   }
@@ -116,19 +119,24 @@ export async function updateUser(req: Request, res: Response): Promise<void> {
       });
       return;
     }
-
-    const input = body as UpdateUserInput;
-    const user = await userService.updateUser(id, input);
-    res.status(200).json({ user: toPublicUser(user) });
+    const product = await productService.updateProduct(id, body as Partial<{
+      name: string;
+      description: string;
+      price: number;
+      stock: number;
+      category: string;
+      imageUrl: string | null;
+    }>);
+    res.status(200).json({ product });
   } catch (err) {
     handleError(res, err);
   }
 }
 
 /**
- * DELETE /api/users/:id
+ * DELETE /api/products/:id — ADMIN only.
  */
-export async function deleteUser(req: Request, res: Response): Promise<void> {
+export async function deleteProduct(req: Request, res: Response): Promise<void> {
   const id = parseId(req.params.id);
   if (id === null) {
     res.status(400).json({
@@ -138,7 +146,7 @@ export async function deleteUser(req: Request, res: Response): Promise<void> {
   }
 
   try {
-    await userService.deleteUser(id);
+    await productService.deleteProduct(id);
     res.status(204).send();
   } catch (err) {
     handleError(res, err);

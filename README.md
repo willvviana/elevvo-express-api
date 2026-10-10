@@ -2,7 +2,9 @@
 
 [![CI](https://github.com/willvviana/elevvo-express-api/actions/workflows/ci.yml/badge.svg)](https://github.com/willvviana/elevvo-express-api/actions/workflows/ci.yml)
 
-A production-style REST API for an e-commerce domain. Built with Express, TypeScript, PostgreSQL (via Prisma), and Redis. Demonstrates layered architecture, JWT auth with RBAC, relational data modeling, atomic transactional checkout, cache-aside reads, distributed rate limiting, containerized local development, and automated CI.
+**Live API:** https://elevvo-api-5y8a.onrender.com/api/health
+
+A production-deployed REST API for an e-commerce domain. Built with Express, TypeScript, PostgreSQL (via Prisma), and Redis. Deployed to Render with managed Postgres (Neon) and managed Redis (Upstash).
 
 Part of the Elevvo backend task sequence.
 
@@ -12,9 +14,38 @@ Part of the Elevvo backend task sequence.
 - **Task 6** — Redis cache-aside, cache invalidation, distributed rate limiting
 - **Task 7** — Multi-stage Docker build, automated tests, GitHub Actions CI
 
+## Live deployment
+
+| Component | Provider | Notes |
+|---|---|---|
+| **API** | [Render](https://render.com) | Docker container, free tier |
+| **Database** | [Neon](https://neon.tech) | Managed PostgreSQL 16, free tier |
+| **Cache** | [Upstash](https://upstash.com) | Serverless Redis 7, free tier |
+
+**Live URL:** https://elevvo-api-5y8a.onrender.com
+
+**Health check:** https://elevvo-api-5y8a.onrender.com/api/health
+
+**Free-tier cold starts.** Render spins the container down after 15 minutes of inactivity. The first request after idle takes 30–60 seconds. Subsequent requests are fast.
+
+### Try it
+
+```bash
+# Health check
+curl https://elevvo-api-5y8a.onrender.com/api/health
+
+# Products list (empty until you create some)
+curl https://elevvo-api-5y8a.onrender.com/api/products
+
+# Login
+curl -X POST https://elevvo-api-5y8a.onrender.com/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"will@elevvo.dev","password":"<your-password>"}'
+```
+
 ## What it does
 
-A small e-commerce backend with three resources: **users**, **products**, and **orders**. Ships with Postgres and Redis containers, a Dockerfile, and a CI pipeline.
+A small e-commerce backend with three resources: **users**, **products**, and **orders**.
 
 - **Layered architecture** — routes → controllers → services → store
 - **JWT authentication** — login issues a signed token, protected routes verify it
@@ -25,16 +56,22 @@ A small e-commerce backend with three resources: **users**, **products**, and **
 - **Relational persistence** — PostgreSQL with Prisma, migration history in `prisma/migrations/`
 - **Atomic checkout** — order creation wrapped in a Prisma `$transaction`
 - **Cache-aside reads** — product endpoints served from Redis with a 1-hour TTL
-- **Cache invalidation** — every write purges affected keys, so reads are never stale
-- **Distributed rate limiting** — login and global limiters use Redis, so limits persist across restarts and scale horizontally
+- **Cache invalidation** — every write purges affected keys
+- **Distributed rate limiting** — login and global limiters use Redis, shared across instances
 - **Containerized** — multi-stage Dockerfile produces a ~230MB production image
-- **Tested** — Jest + Supertest cover auth, RBAC, products, orders, and transaction rollback
-- **CI** — GitHub Actions runs typecheck, build, and tests on every push and PR
+- **Tested** — 23 Jest/Supertest assertions covering auth, RBAC, products, orders, and transaction rollback
+- **CI/CD** — GitHub Actions runs typecheck, build, and tests on every push and PR
 
 ## Architecture
 
 ```
-Request
+Client (HTTPS)
+  ↓
+[ Cloudflare ]                      TLS termination, DDoS protection
+  ↓
+[ Render ]                          container hosting, auto-deploys on push
+  ↓
+[ Express App ]
   ↓
 [ helmet ]                          security headers
   ↓
@@ -44,7 +81,7 @@ Request
   ↓
 [ express.json() ]                  parses JSON bodies
   ↓
-[ rate limiters ]                   Redis-backed global + login-specific
+[ rate limiters ]                   Redis-backed (Upstash)
   ↓
 [ requireApiKey ]                   /api/users only
   ↓
@@ -56,26 +93,18 @@ Request
   ↓
 [ services ]                        business logic
   ↓
-[ lib/store → Prisma ]              PostgreSQL
-  ↓
-[ lib/redis ]                       cache-aside + rate limit store
+[ lib/store → Prisma ] → [ Neon Postgres ]
+[ lib/redis → ioredis ] → [ Upstash Redis ]
 ```
-
-**Rules the code follows:**
-
-- **Routes** declare URLs. Nothing else.
-- **Controllers** handle HTTP: parse requests, call services, send responses. No business logic.
-- **Services** handle business logic. They never touch `req` or `res`.
-- **Store** is the only place Prisma is used. Swapping databases means changing one file.
-- **Redis** is accessed only through `lib/redis.ts` helpers.
 
 ## Stack
 
+**Runtime & language**
 - **Node.js** ≥20
-- **Express 4** — HTTP framework
 - **TypeScript** — strict mode (`strict: true`, `noImplicitAny`, `strictNullChecks`)
-- **PostgreSQL 16** — relational database, Docker container
-- **Redis 7** — cache and rate-limit store, Docker container
+
+**Framework & libraries**
+- **Express 4** — HTTP framework
 - **Prisma 6** — ORM and migration tool
 - **redis 6** — official Node Redis client
 - **rate-limit-redis 6** — Redis-backed store for express-rate-limit
@@ -84,12 +113,21 @@ Request
 - **helmet** — security headers
 - **express-rate-limit 8** — request throttling
 - **cors** — origin whitelisting
+
+**Data**
+- **PostgreSQL 16** — Neon in production, Docker locally
+- **Redis 7** — Upstash in production, Docker locally
+
+**Dev & testing**
 - **Jest 30** — test runner
-- **ts-jest** — TypeScript transformer for Jest
+- **ts-jest** — TypeScript transformer
 - **Supertest** — HTTP assertions
-- **tsx** — TypeScript execution without a build step
-- **Docker** — multi-stage build, compose orchestration
-- **GitHub Actions** — CI pipeline
+- **tsx** — TypeScript execution
+
+**Deployment**
+- **Docker** — multi-stage build
+- **Render** — container hosting
+- **GitHub Actions** — CI
 
 ## Domain model
 
@@ -113,7 +151,7 @@ User ──┬──< Order ──< OrderItem >── Product
 docker compose up --build -d
 ```
 
-This builds the API image, starts Postgres, Redis, and the API, and waits for each dependency's healthcheck before starting the next.
+Builds the API image, starts Postgres, Redis, and the API, waits for health checks.
 
 Verify:
 
@@ -121,19 +159,15 @@ Verify:
 docker compose ps
 ```
 
-All three containers should be running. The API is at `http://localhost:3000`.
+API at `http://localhost:3000`.
 
-Stop everything:
+Stop:
 
 ```bash
 docker compose down
 ```
 
-Data persists in the `pgdata` volume. To wipe it: `docker compose down -v`.
-
 ### Option B — Local dev with hot reload
-
-Use this for development. Postgres and Redis in Docker, the API running locally with `tsx watch`.
 
 #### 1. Start Postgres and Redis
 
@@ -149,8 +183,6 @@ npm install
 
 #### 3. Configure environment
 
-Copy `.env.example` to `.env` and adjust as needed:
-
 ```bash
 cp .env.example .env
 ```
@@ -163,7 +195,7 @@ TEST_DATABASE_URL="postgresql://elevvo:elevvo_dev_password@127.0.0.1:5433/elevvo
 REDIS_URL="redis://localhost:6379"
 ```
 
-Set the remaining variables in your shell (PowerShell):
+Shell variables (PowerShell):
 
 ```powershell
 $env:API_KEY="dev-secret-123"
@@ -177,6 +209,7 @@ $env:ALLOWED_ORIGINS="http://localhost:5173,http://localhost:3000"
 ```bash
 npx prisma migrate deploy
 npx prisma generate
+$env:SEED_PASSWORD="password123"
 npx tsx prisma/seed.ts
 ```
 
@@ -186,20 +219,9 @@ npx tsx prisma/seed.ts
 npm run dev
 ```
 
-Expected startup:
-
-```
-Redis connected to redis://localhost:6379
-Server running at http://localhost:3000
-NODE_ENV: development
-CORS origins: http://localhost:5173, http://localhost:3000
-```
-
-### Note on the Postgres port
+#### Note on the Postgres port
 
 Docker's Postgres is exposed on host port **5433**, not 5432. This avoids a conflict with native Postgres installations on Windows.
-
-The `DATABASE_URL` in `.env` must use port 5433.
 
 ### Required environment variables
 
@@ -210,13 +232,14 @@ The `DATABASE_URL` in `.env` must use port 5433.
 | `REDIS_URL` | Redis connection string | Non-empty |
 | `API_KEY` | Shared secret for `/api/users` requests | Non-empty |
 | `JWT_SECRET` | Signing key for JWTs | **32 characters** |
+| `SEED_PASSWORD` | Password for seeded users (dev only) | 12 characters |
 | `JWT_EXPIRES_IN` | Token lifetime (optional) | Default: `1h` |
 | `ALLOWED_ORIGINS` | Comma-separated CORS whitelist (optional) | Default: `http://localhost:5173` |
 | `PORT` | Server port (optional) | Default: `3000` |
 
 ## Seeded users
 
-Three users, all with password `password123`:
+Three users are created by `prisma/seed.ts`. In production, the password is whatever you set `SEED_PASSWORD` to. In dev, `password123` is the convention.
 
 | Email | Role |
 |---|---|
@@ -224,18 +247,17 @@ Three users, all with password `password123`:
 | maya@elevvo.dev | CUSTOMER |
 | sam@elevvo.dev | CUSTOMER |
 
-Run `npx tsx prisma/seed.ts` to insert them. The script uses `upsert`, so re-running is safe.
-
 ## API endpoints
 
 ### Public
 
 | Method | Path | Description |
 |---|---|---|
+| GET | `/` | Service info and docs links |
 | GET | `/api/health` | Uptime and status |
 | POST | `/api/auth/signup` | Register a new user |
-| POST | `/api/auth/login` | Exchange credentials for a JWT. Rate limited to 5 attempts per 15 minutes per IP. |
-| GET | `/api/products` | List products. Supports `?page=&perPage=&category=`. Cached. |
+| POST | `/api/auth/login` | Exchange credentials for a JWT. Rate limited: 5 attempts per 15 minutes per IP. |
+| GET | `/api/products` | List products. `?page=&perPage=&category=`. Cached. |
 | GET | `/api/products/:id` | Get one product. Cached. |
 
 ### Authenticated (requires `Authorization: Bearer <token>`)
@@ -246,106 +268,58 @@ Run `npx tsx prisma/seed.ts` to insert them. The script uses `upsert`, so re-run
 | GET | `/api/users` | Any (also requires `x-api-key`) |
 | GET | `/api/users/:id` | Any (also requires `x-api-key`) |
 | POST | `/api/users` | ADMIN (also requires `x-api-key`) |
-| PUT | `/api/users/:id` | ADMIN, or the user themselves (also requires `x-api-key`) |
+| PUT | `/api/users/:id` | ADMIN or self (also requires `x-api-key`) |
 | DELETE | `/api/users/:id` | ADMIN (also requires `x-api-key`) |
 | POST | `/api/products` | ADMIN |
 | PUT | `/api/products/:id` | ADMIN |
 | DELETE | `/api/products/:id` | ADMIN |
 | POST | `/api/orders` | Any authenticated |
-| GET | `/api/orders` | Any authenticated (own orders only) |
-| GET | `/api/orders/:id` | Any authenticated (own order, or any if ADMIN) |
+| GET | `/api/orders` | Any authenticated (own orders) |
+| GET | `/api/orders/:id` | Any authenticated (own, or any if ADMIN) |
 
 ## Atomic checkout
 
-The `POST /api/orders` endpoint performs three operations atomically inside a Prisma `$transaction`:
+`POST /api/orders` performs three operations atomically inside a Prisma `$transaction`:
 
 1. Verify every product exists and has sufficient stock.
 2. Decrement stock for each product.
 3. Create the order and its order items.
 
-If **any** step fails — missing product, insufficient stock, database error — the entire transaction rolls back. No half-state.
+If any step fails — missing product, insufficient stock, database error — the entire transaction rolls back. No half-state.
 
-**Why this matters.** Without the transaction, a failure between step 2 and step 3 would leave the database with stock decremented but no order created. That's a silent data integrity bug that compounds over time.
-
-### Example: place an order
-
-```bash
-curl.exe -X POST http://localhost:3000/api/orders \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer <TOKEN>" \
-  -d '{"items":[{"productId":1,"quantity":2},{"productId":2,"quantity":1}]}'
-```
-
-Response:
-
-```json
-{
-  "order": {
-    "id": 1,
-    "userId": 2,
-    "status": "PENDING",
-    "total": "649.48",
-    "items": [
-      {
-        "id": 1,
-        "productId": 1,
-        "quantity": 2,
-        "priceAtPurchase": "249.99",
-        "product": { "id": 1, "name": "Wireless Headphones" }
-      },
-      { "id": 2, "productId": 2, "quantity": 1, "priceAtPurchase": "149.5" }
-    ]
-  }
-}
-```
+**Why this matters.** Without the transaction, a failure between step 2 and step 3 would leave stock decremented but no order created. Silent data corruption.
 
 ## Caching and distributed rate limiting
 
-Two Redis integrations run alongside Postgres.
-
 ### Cache-aside on product reads
 
-`GET /api/products` and `GET /api/products/:id` use the **cache-aside pattern**:
+1. Build a deterministic key from the request.
+2. Redis GET. On hit, return immediately.
+3. On miss, query Postgres, SET in Redis with a 1-hour TTL, return.
 
-1. Build a deterministic cache key from the request (path + query params).
-2. Check Redis. On hit, return immediately.
-3. On miss, query Postgres, store the result in Redis with a 1-hour TTL, return.
-
-Every response includes an `X-Cache` header (`HIT` or `MISS`) so cache behavior is visible in curl and logs.
-
-Cache keys are namespaced (`products:list:v1:...`, `products:detail:v1:...`). The `v1` suffix allows invalidating everything by bumping the version if the response shape ever changes.
+Every response carries an `X-Cache` header (`HIT` or `MISS`) so behavior is observable.
 
 ### Cache invalidation
 
-Every write to the products table (POST, PUT, DELETE) purges all keys under `products:*` via `SCAN` + `DEL`. Without this, a write would leave stale data cached for up to an hour.
+Every write to `products` purges all keys under `products:*` via `SCAN` + `DEL`. Without this, writes leave stale data cached for up to an hour.
 
-This is deliberate — "delete all" is safe and cheap at this scale. A production system with high write volume would target only the affected keys.
-
-`SCAN` is used instead of `KEYS` because `KEYS` blocks the Redis server while it walks the entire keyspace. `SCAN` batches the work and is safe on a live server.
+`SCAN` rather than `KEYS` — `KEYS` blocks Redis while it walks the keyspace.
 
 ### Distributed rate limiting
 
-Both rate limiters (`login` and `global`) store their counters in Redis via `rate-limit-redis`, not in the Node process.
+Login and global rate limiters store counters in Upstash Redis. In-process counters wouldn't scale across instances; Redis makes the quota global.
 
-This matters when running multiple API instances behind a load balancer. With in-process counters, a client hitting three instances gets three separate quotas. With Redis, the counter is shared — one global quota per IP.
-
-**To verify:** hit `/api/auth/login` six times to trigger the limit, restart the server, and try again. The `429` persists because the counter lives in Redis.
+**Verify:** hit `/api/auth/login` six times, restart the server, try again. The `429` persists.
 
 ## Testing
 
-Tests use Jest and Supertest. They run against a separate `elevvo_test` database so dev data is never touched.
+Tests use Jest and Supertest against a separate `elevvo_test` database.
 
 ### Setup
 
-Create the test database once (it persists across restarts):
-
 ```bash
 docker exec elevvo-postgres psql -U elevvo -d elevvo_dev -c "CREATE DATABASE elevvo_test;"
-```
 
-Apply migrations to it:
-
-```bash
 $env:DATABASE_URL="postgresql://elevvo:elevvo_dev_password@127.0.0.1:5433/elevvo_test?schema=public"
 npx prisma migrate deploy
 Remove-Item Env:\DATABASE_URL
@@ -357,11 +331,6 @@ Ensure Postgres and Redis containers are up:
 
 ```bash
 docker compose up -d db cache
-```
-
-Then:
-
-```bash
 npm test
 ```
 
@@ -374,65 +343,60 @@ Tests:       23 passed, 23 total
 
 ### What's covered
 
-- **auth.test.ts** — signup validation, login with valid/invalid credentials, no user enumeration, JWT-protected routes, malformed auth headers.
+- **auth.test.ts** — signup validation, login, no user enumeration, JWT-protected routes, malformed auth headers.
 - **products.test.ts** — public reads, pagination, category filtering, RBAC on writes, validation.
-- **orders.test.ts** — successful checkout with stock decrement, **transaction rollback on failure**, insufficient stock, ownership enforcement (404 not 403), admin override.
+- **orders.test.ts** — successful checkout with stock decrement, **transaction rollback**, insufficient stock, ownership (404 not 403), admin override.
 
-The transaction rollback test is the most important one. It proves that a partial failure doesn't leave the database in an inconsistent state.
+## Deployment
 
-## Docker
+### Where everything runs
 
-### Multi-stage Dockerfile
+| Layer | Provider | Service |
+|---|---|---|
+| **TLS/CDN** | Cloudflare | Automatic via Render |
+| **API** | Render | Docker container from `main` |
+| **Database** | Neon | Managed PostgreSQL, pooled connection |
+| **Cache** | Upstash | Serverless Redis, TLS (`rediss://`) |
 
-- **Builder stage** — full Node image with dev deps, compiles TypeScript.
-- **Runner stage** — `node:20-alpine`, installs production deps only, copies the compiled output.
+### How deploys work
 
-Result: ~230MB image, no source code, no dev deps, runs as non-root.
+Every push to `main`:
 
-Build:
+1. GitHub Actions runs typecheck, build, tests.
+2. On success, Render rebuilds the Docker image.
+3. On container start, `npx prisma migrate deploy` applies pending migrations.
+4. `node dist/index.js` starts the server.
 
-```bash
-docker build -t elevvo-api:latest .
-```
+Zero-downtime because Render swaps containers only after the new one passes its health check.
 
-Run standalone:
+### Environment variables in production
 
-```bash
-docker run --rm -p 4000:3000 \
-  -e DATABASE_URL="postgresql://elevvo:elevvo_dev_password@host.docker.internal:5433/elevvo_dev?schema=public" \
-  -e REDIS_URL="redis://host.docker.internal:6379" \
-  -e API_KEY="dev-secret-123" \
-  -e JWT_SECRET="dev-jwt-secret-change-in-production-min-32-chars" \
-  elevvo-api:latest
-```
+Set in Render's dashboard. **Never in the repo.** The `.env` file is gitignored.
 
-### Compose orchestration
+Required in production:
 
-`docker-compose.yml` defines three services with health-checked dependencies:
+- `DATABASE_URL` — Neon connection string
+- `REDIS_URL` — Upstash connection string
+- `API_KEY`, `JWT_SECRET`, `JWT_EXPIRES_IN`
+- `ALLOWED_ORIGINS`, `NODE_ENV=production`
 
-- `db` — Postgres on host port 5433.
-- `cache` — Redis on host port 6379.
-- `api` — built from the Dockerfile, waits for both dependencies to be healthy before starting.
-
-One command starts everything:
+### Redeploying
 
 ```bash
-docker compose up --build -d
+git push origin main
 ```
 
-## CI
+Render detects the push and rebuilds. No manual step.
 
-`.github/workflows/ci.yml` runs on every push and PR to `main`:
+### Rotating secrets
 
-1. Spins up Postgres and Redis service containers.
-2. `npm ci`.
-3. `prisma generate`.
-4. `prisma migrate deploy`.
-5. `npm run typecheck`.
-6. `npm run build`.
-7. `npm test`.
+**JWT_SECRET:** changing it invalidates all existing tokens. Users must re-login. Update in Render → Environment → Save. Render restarts.
 
-If any step fails, the PR is blocked (when branch protection is configured).
+**API_KEY:** change in Render. Frontend clients using the old key get 401.
+
+**DATABASE_URL:** only if Neon rotates the password. Update in Render.
+
+**REDIS_URL:** only if Upstash rotates the token. Update in Render.
 
 ## Error format
 
@@ -458,46 +422,58 @@ Status codes:
 | 401 | Not authenticated |
 | 403 | Authenticated but not authorized |
 | 404 | Resource not found |
-| 409 | Conflict (e.g., email exists, FK constraint) |
+| 409 | Conflict (email exists, FK constraint) |
 | 429 | Rate limited |
 | 500 | Server error |
 
 ## Security notes
 
-- **Password hashing** — bcrypt, cost factor 12. About 250ms per hash.
-- **Timing-attack mitigation** — login always runs a bcrypt comparison, even for nonexistent emails, so response time doesn't leak which emails are registered.
-- **JWT algorithm pinning** — `HS256` is explicitly required. Other algorithms are rejected.
-- **Generic login errors** — "Invalid email or password" for both wrong email and wrong password.
-- **Rate limiting on login** — 5 attempts per 15 minutes per IP, enforced across instances via Redis.
-- **Strict CORS** — whitelisted origins only. No wildcard.
+- **Password hashing** — bcrypt, cost factor 12. ~250ms per hash.
+- **Timing-attack mitigation** — login always runs a bcrypt comparison, even for nonexistent emails.
+- **JWT algorithm pinning** — `HS256` only.
+- **Generic login errors** — no user enumeration.
+- **Rate limiting on login** — 5 attempts per 15 minutes per IP, distributed via Redis.
+- **Strict CORS** — whitelisted origins only.
 - **Helmet** — standard security headers.
-- **Fail-closed env handling** — server won't start if `JWT_SECRET` is missing or under 32 characters.
-- **No password hashes in responses** — `toPublicUser()` strips the hash before serialization.
-- **Server-controlled pricing** — order totals are computed from database prices, never from client input.
-- **Order ownership enforced in service layer** — a customer cannot view another customer's order (returns 404 to prevent id enumeration).
-- **Container runs as non-root** — the runner stage uses `USER node`.
+- **Fail-closed env handling** — server refuses to start if `JWT_SECRET` is missing or under 32 characters.
+- **Trimmed env vars** — all values are `.trim()`-ed to prevent invisible-whitespace bugs.
+- **No password hashes in responses** — `toPublicUser()` strips the hash.
+- **Server-controlled pricing** — order totals computed from DB prices, never client input.
+- **Order ownership in service layer** — non-owners get 404, not 403, to prevent enumeration.
+- **Container runs as non-root** — `USER node` in the runner stage.
 
 ## What's missing
 
-- **No token revocation.** A JWT is valid until it expires. Client-side logout doesn't invalidate the token server-side.
+- **No token revocation.** A JWT is valid until it expires.
 - **No refresh tokens.** Users re-login every hour.
-- **No email verification.** Signup creates active accounts immediately.
-- **API key is a single static value.** No rotation, no per-client keys.
+- **No email verification.**
+- **API key is a single static value.**
 - **No password reset flow.**
-- **Decimal handling in total calculation** — `Number(product.price) * quantity` converts the Prisma Decimal to a JS number. For small totals this is safe; a real payments system should use a decimal library like `decimal.js`.
-- **No soft deletes.** Deleting a product referenced by an order is blocked by the FK constraint.
-- **Redis is not persisted.** Cache and rate-limit counters vanish if the Redis container is recreated.
-- **No cache stampede protection.** A hundred simultaneous cold-cache requests will all hit Postgres.
-- **`X-Cache` header exposed in production responses.** Useful for debugging but reveals internal infrastructure.
-- **Tests run sequentially.** `maxWorkers: 1` in `jest.config.js` because all suites share one test database. Per-file DB isolation would let them run in parallel.
+- **Decimal arithmetic for order totals** uses `Number()`. Fine for small amounts; a payments system should use a decimal library.
+- **No soft deletes.** Deleting a product with orders is blocked by the FK.
+- **Redis is not persisted.** Cache and rate-limit counters vanish if the container is recreated.
+- **No cache stampede protection.** Simultaneous cold-cache requests all hit Postgres.
+- **Tests run sequentially** (`maxWorkers: 1`) because all suites share one test database.
+- **Free-tier cold starts.** The Render instance spins down after 15 minutes idle. First request wakes it in 30–60s.
 
 ## What I'd add next
 
 - Refresh token rotation
 - Structured logging with `pino`
-- OpenAPI spec generation
+- OpenAPI spec (Swagger UI)
 - Cache stampede protection via distributed locks
-- Redis persistence (`appendonly yes`) for rate-limit counters
+- Redis persistence (`appendonly yes`)
 - Soft deletes with an `isActive` flag
-- Deployment to Render or Fly.io
-- CD pipeline that deploys on merge to `main`
+- Custom domain
+- Additional business logic: order status transitions, inventory alerts, low-stock notifications
+
+## Related repositories
+
+- **[elevvo-frontend](https://github.com/willvviana/elevvo-frontend)** — Tasks 1–5 static frontend (HTML/CSS/JS), deployed on GitHub Pages
+- **[taskflow-dashboard](https://github.com/willvviana/taskflow-dashboard)** — Task 6 React dashboard, deployed on GitHub Pages
+- **[elevvo-async-engine](https://github.com/willvviana/elevvo-async-engine)** — Task 2 TypeScript async data engine
+- **[elevvo-backend](https://github.com/willvviana/elevvo-backend)** — Task 1 raw Node HTTP server
+
+## License
+
+MIT

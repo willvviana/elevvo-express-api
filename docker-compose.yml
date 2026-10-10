@@ -10,17 +10,26 @@ services:
       POSTGRES_PASSWORD: elevvo_dev_password
       POSTGRES_DB: elevvo_dev
     ports:
-      # host:container — exposes Postgres on localhost:5432
-      - "5432:5432"
+      # Host port 5433 because native Windows Postgres occupies 5432.
+      - "5433:5432"
     volumes:
-      # named volume — data survives container restarts
-      # but is deleted by `docker compose down -v`
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      # other services can wait until this passes before starting
       test: ["CMD-SHELL", "pg_isready -U elevvo -d elevvo_dev"]
       interval: 5s
       timeout: 5s
+      retries: 5
+
+  cache:
+    image: redis:7-alpine
+    container_name: elevvo-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
       retries: 5
 
 volumes:

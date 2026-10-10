@@ -3,8 +3,8 @@
 /**
  * Environment variable access layer.
  *
- * Centralizes all `process.env.X` reads. Fails FAST at startup if a
- * required var is missing — not on first request.
+ * Centralizes every `process.env.X` read. Fails FAST at startup if a
+ * required var is missing — not on the first request that needs it.
  *
  * Rule: never read `process.env` directly anywhere except here.
  */
@@ -24,18 +24,26 @@ function optional(name: string, fallback: string): string {
 export const env = {
   PORT: Number(optional("PORT", "3000")),
 
+  // Required — server won't start without these
   API_KEY: required("API_KEY"),
   JWT_SECRET: required("JWT_SECRET"),
+  REDIS_URL: required("REDIS_URL"),
 
-  JWT_EXPIRES_IN: optional("JWT_EXPIRES_IN", "1h") as string,
+  // Optional with sane defaults
+  JWT_EXPIRES_IN: optional("JWT_EXPIRES_IN", "1h"),
   NODE_ENV: optional("NODE_ENV", "development"),
 
+  // CORS whitelist. Comma-separated in the env var.
   ALLOWED_ORIGINS: optional("ALLOWED_ORIGINS", "http://localhost:5173")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean),
 } as const;
 
+/**
+ * Sanity check: JWT secret must be long enough to be safe.
+ * HS256 keys shorter than 32 bytes are trivially brute-forced.
+ */
 if (env.JWT_SECRET.length < 32) {
   throw new Error(
     `JWT_SECRET must be at least 32 characters. Got ${env.JWT_SECRET.length}.`,

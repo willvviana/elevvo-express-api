@@ -14,27 +14,6 @@ import { env } from "./env.js";
 
 const client: RedisClientType = createClient({ url: env.REDIS_URL });
 
-/* ============================================================
-   TEMPORARY DEBUG LOGGING
-   Remove this block after the Redis auth issue is resolved.
-   It prints only non-sensitive info: host, username, and the
-   length + first/last 3 characters of the password. First 3 and
-   last 3 chars alone can't authenticate.
-   ============================================================ */
-try {
-  const parsed = new URL(env.REDIS_URL);
-  console.log("DEBUG redis host:", parsed.host);
-  console.log("DEBUG redis username:", parsed.username);
-  console.log("DEBUG redis password length:", parsed.password.length);
-  console.log("DEBUG redis password first3:", parsed.password.slice(0, 3));
-  console.log("DEBUG redis password last3:", parsed.password.slice(-3));
-} catch (e) {
-  console.error("DEBUG redis URL parse failed:", e);
-}
-/* ============================================================
-   END TEMPORARY DEBUG LOGGING
-   ============================================================ */
-
 // Redis errors are swallowed unless a listener exists. Log them.
 client.on("error", (err) => {
   console.error("Redis error:", err);

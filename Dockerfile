@@ -64,4 +64,7 @@ USER node
 
 EXPOSE 3000
 
-CMD ["node", "dist/index.js"]
+# Start the server. Runs migrations first, then starts.
+# Exec form (JSON array) so the shell receives the whole string
+# as a single -c argument. Signals reach node directly.
+CMD ["sh", "-c", "npx prisma migrate deploy && node dist/index.js"]

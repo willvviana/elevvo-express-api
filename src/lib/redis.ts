@@ -26,7 +26,8 @@ client.on("error", (err) => {
 const connectPromise: Promise<void> = (async () => {
   if (!client.isOpen) {
     await client.connect();
-    console.log(`Redis connected to ${env.REDIS_URL}`);
+    const url = new URL(env.REDIS_URL);
+    console.log(`Redis connected to ${url.host}`);
   }
 })();
 

@@ -99,6 +99,21 @@ export function createApp(): express.Express {
   app.use("/api/users", requireApiKey, userRouter);
   app.use("/api/orders", orderRouter);
 
+// Root route — helpful landing info for anyone who visits the bare URL.
+app.get("/", (_req, res) => {
+  res.json({
+    service: "elevvo-express-api",
+    status: "ok",
+    docs: {
+      health: "/api/health",
+      products: "/api/products",
+      login: "POST /api/auth/login",
+      users: "GET /api/users (auth required)",
+      orders: "GET /api/orders (auth required)",
+    },
+  });
+});
+
   app.use((req, res) => {
     res.status(404).json({
       error: { code: "NOT_FOUND", message: `Cannot ${req.method} ${req.path}` },

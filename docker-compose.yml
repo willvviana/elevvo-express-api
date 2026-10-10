@@ -1,4 +1,13 @@
 # docker-compose.yml
+#
+# Orchestrates the full local stack:
+#   db    — Postgres 16 on host port 5433 (native Postgres occupies 5432)
+#   cache — Redis 7 on host port 6379
+#   api   — the compiled API image, waits for db and cache to be healthy
+#
+# `docker compose up --build -d` builds the API image, starts all three
+# containers, and waits for each dependency's healthcheck before
+# starting dependents.
 
 services:
   db:
@@ -15,6 +24,8 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
+      # pg_isready returns 0 once Postgres is accepting connections.
+      # The API service waits for this before starting.
       test: ["CMD-SHELL", "pg_isready -U elevvo -d elevvo_dev"]
       interval: 5s
       timeout: 5s
@@ -31,6 +42,32 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: elevvo-api
+    restart: unless-stopped
+    ports:
+      # Expose on 3000. If you want it elsewhere, change the left side.
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      # Service names resolve to container IPs on the compose network.
+      # That's how the API reaches db and cache.
+      DATABASE_URL: "postgresql://elevvo:elevvo_dev_password@db:5432/elevvo_dev?schema=public"
+      REDIS_URL: "redis://cache:6379"
+      API_KEY: "dev-secret-123"
+      JWT_SECRET: "dev-jwt-secret-change-in-production-min-32-chars"
+      JWT_EXPIRES_IN: "1h"
+      ALLOWED_ORIGINS: "http://localhost:5173,http://localhost:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+      cache:
+        condition: service_healthy
 
 volumes:
   pgdata:

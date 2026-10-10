@@ -3,18 +3,24 @@
 /**
  * Environment variable access layer.
  *
- * Centralizes every `process.env.X` read. Fails FAST at startup if a
- * required var is missing — not on the first request that needs it.
+ * Centralizes all `process.env.X` reads. Fails FAST at startup if a
+ * required var is missing — not on the first request.
  *
  * Rule: never read `process.env` directly anywhere except here.
+ *
+ * NOTE: `required` and `optional` both call `.trim()` on the value.
+ * This is defensive against invisible whitespace — trailing spaces
+ * or newlines — that slip in when pasting values into a hosting
+ * provider's env var field. Without trimming, the wrong value
+ * reaches the client and causes auth failures like Redis WRONGPASS.
  */
 
 function required(name: string): string {
-  const value = process.env[name];
-  if (!value || value.trim().length === 0) {
+  const raw = process.env[name];
+  if (!raw || raw.trim().length === 0) {
     throw new Error(`Missing required environment variable: ${name}`);
   }
-  return value;
+  return raw.trim();
 }
 
 function optional(name: string, fallback: string): string {

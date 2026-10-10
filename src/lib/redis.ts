@@ -14,6 +14,27 @@ import { env } from "./env.js";
 
 const client: RedisClientType = createClient({ url: env.REDIS_URL });
 
+/* ============================================================
+   TEMPORARY DEBUG LOGGING
+   Remove this block after the Redis auth issue is resolved.
+   It prints only non-sensitive info: host, username, and the
+   length + first/last 3 characters of the password. First 3 and
+   last 3 chars alone can't authenticate.
+   ============================================================ */
+try {
+  const parsed = new URL(env.REDIS_URL);
+  console.log("DEBUG redis host:", parsed.host);
+  console.log("DEBUG redis username:", parsed.username);
+  console.log("DEBUG redis password length:", parsed.password.length);
+  console.log("DEBUG redis password first3:", parsed.password.slice(0, 3));
+  console.log("DEBUG redis password last3:", parsed.password.slice(-3));
+} catch (e) {
+  console.error("DEBUG redis URL parse failed:", e);
+}
+/* ============================================================
+   END TEMPORARY DEBUG LOGGING
+   ============================================================ */
+
 // Redis errors are swallowed unless a listener exists. Log them.
 client.on("error", (err) => {
   console.error("Redis error:", err);
@@ -26,14 +47,14 @@ client.on("error", (err) => {
 const connectPromise: Promise<void> = (async () => {
   if (!client.isOpen) {
     await client.connect();
+    // Log only the host — never the credentials.
     const url = new URL(env.REDIS_URL);
     console.log(`Redis connected to ${url.host}`);
   }
 })();
 
 /**
- * Wait for Redis to be connected. Call this at server startup to fail
- * fast if Redis is unreachable — better than failing on the first request.
+ * Wait for Redis to be connected. Call at server startup to fail fast.
  */
 export async function ensureRedisReady(): Promise<void> {
   await connectPromise;
@@ -41,10 +62,6 @@ export async function ensureRedisReady(): Promise<void> {
 
 /* ---------------- Cache helpers ---------------- */
 
-/**
- * Get a cached value. Returns null on miss or on parse error.
- * Values are stored as JSON strings; we parse on read.
- */
 export async function cacheGet<T>(key: string): Promise<T | null> {
   const raw = await client.get(key);
   if (raw === null) return null;
@@ -52,19 +69,12 @@ export async function cacheGet<T>(key: string): Promise<T | null> {
   try {
     return JSON.parse(raw) as T;
   } catch {
-    // Corrupt cache entry. Delete it and treat as a miss so the caller
-    // refetches. Without this, a malformed entry causes repeated failures.
+    // Corrupt entry — delete it and treat as a miss.
     await client.del(key);
     return null;
   }
 }
 
-/**
- * Set a cached value with a TTL in seconds.
- *
- * Redis supports both EX (seconds) and PX (milliseconds). We use seconds
- * because the TTLs in this project are in minutes/hours.
- */
 export async function cacheSet(
   key: string,
   value: unknown,
@@ -73,23 +83,20 @@ export async function cacheSet(
   await client.set(key, JSON.stringify(value), { EX: ttlSeconds });
 }
 
-/**
- * Delete one key. Used for targeted invalidation.
- */
 export async function cacheDel(key: string): Promise<void> {
   await client.del(key);
 }
 
 /**
- * Delete every key matching a pattern.
+ * Delete all keys matching a pattern.
  *
- * Uses SCAN, not KEYS. KEYS blocks the Redis server while it walks the
- * entire keyspace — a real outage risk in production. SCAN batches the
- * work and returns a cursor. We loop until the cursor returns to 0.
+ * Uses SCAN, not KEYS. KEYS blocks the server while it walks the
+ * entire keyspace — a real outage risk. SCAN batches the work.
+ *
+ * redis@6 uses string cursors (the Redis protocol returns them as
+ * strings). Start at "0", loop until the server returns "0" back.
  */
 export async function cacheDelPattern(pattern: string): Promise<void> {
-  // redis@6 uses string cursors (Redis protocol returns them as strings).
-  // Start at "0", loop until the server returns "0" back.
   let cursor = "0";
 
   do {
@@ -101,14 +108,8 @@ export async function cacheDelPattern(pattern: string): Promise<void> {
   } while (cursor !== "0");
 }
 
-/**
- * Raw client for the rate limiter. Prefer the helpers above otherwise.
- */
 export const redisClient = client;
 
-/**
- * Graceful shutdown. Called on SIGTERM.
- */
 export async function closeRedis(): Promise<void> {
   if (client.isOpen) {
     await client.quit();
